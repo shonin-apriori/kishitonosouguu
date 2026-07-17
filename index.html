@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>8×9 交点盤：ターン終了→可視化→移動/捕獲（車）</title>
+<meta name="color-scheme" content="light dark" />
+<style>
+  :root{
+    --board-size-x: 8; /* 横線本数 */
+    --board-size-y: 9; /* 縦線本数 */
+    --cell: clamp(36px, 8.5vw, 64px);
+
+    --grid-w: calc(var(--cell) * (var(--board-size-x) - 1));
+    --grid-h: calc(var(--cell) * (var(--board-size-y) - 1));
+    --line: 2px;
+
+    --brand: #2563eb;
+    --brand-dark: #1d4ed8;
+    --danger: #ef4444;
+    --danger-dark: #b91c1c;
+    --ink: #222;
+    --ink-weak: #475569;
+    --bg: #f7f7fb;
+    --panel: #ffffff;
+    --panel-border: #e5e7eb;
+    --muted: #94a3b8;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg: #0b1020;
+      --panel: #101526;
+      --panel-border: #1f273f;
+      --ink: #e5e7eb;
+      --ink-weak: #9aa6c0;
+      --muted: #64748b;
+    }
+  }
+
+  html, body { height: 100%; }
+  body{
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",
+                 "Yu Gothic", "Noto Sans JP", sans-serif;
+    margin:0; color:var(--ink); background:var(--bg);
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+             max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+  h1{font-size:clamp(18px, 2.8vw, 22px); margin:0 0 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  .app{
+    display:grid; gap:16px; align-items:start;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 980px){
+    .app{ grid-template-columns: auto 360px; }
+  }
+  .left{
+    display:grid; gap:16px; align-items:start;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 980px){
+    .left{ grid-template-columns: auto auto; }
+  }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:14px; padding:12px;
+    box-shadow:0 2px 10px rgba(0,0,0,.08);
+  }
+  .legend{font-size:13px; color:var(--ink-weak);}
+
+  .tray{display:flex; gap:10px; flex-wrap:wrap;}
+  .piece-chip{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:44px; min-height:44px; padding:6px 10px; border-radius:9999px;
+    border:1px solid #cbd5e1; background:#fff; cursor:pointer; user-select:none; font-weight:700;
+    transition:transform .06s ease, box-shadow .2s ease, background .2s ease, color .2s ease;
+  }
+  .piece-chip[data-side="enemy"]{ background:#fef7e8; }
+  .piece-chip.selected{
+    outline:3px solid var(--brand);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent);
+  }
+  .piece-chip:active{ transform:scale(.96); }
+
+  .board-wrap{
+    position:relative;
+    width:calc(var(--grid-w) + var(--cell));
+    height:calc(var(--grid-h) + var(--cell));
+    background:linear-gradient(var(--panel),var(--panel));
+    border-radius:14px; border:1px solid var(--panel-border);
+    box-shadow:0 2px 12px rgba(0,0,0,.1); overflow:hidden; padding:8px;
+    margin-inline:auto;
+    touch-action:manipulation;
+  }
+  .board{
+    position:relative;
+    width:calc(var(--grid-w) + var(--cell) - 16px);
+    height:calc(var(--grid-h) + var(--cell) - 16px);
+    margin:auto;
+  }
+  .board .vline, .board .hline{position:absolute; background:var(--muted); opacity:.8;}
+  .board .vline{width:2px; top:0; bottom:0;}
+  .board .hline{height:2px; left:0; right:0;}
+  .pt{position:absolute; width:14px; height:14px; margin-left:-7px; margin-top:-7px; background:#0f172a; border-radius:50%; opacity:.18; pointer-events:none;}
+  @media (prefers-color-scheme: dark){ .pt{opacity:.28;} }
+  .cell{position:absolute; width:36px; height:36px; margin-left:-18px; margin-top:-18px;}
+  @media (min-width: 640px){
+    .cell{ width:42px; height:42px; margin-left:-21px; margin-top:-21px; }
+  }
+
+  .piece{
+    position:absolute; width:46px; height:46px; margin-left:-23px; margin-top:-23px;
+    display:flex; align-items:center; justify-content:center; gap:4px;
+    background:white; border:2px solid var(--muted); border-radius:50%; font-weight:800;
+    user-select:none; box-shadow:0 4px 10px rgba(0,0,0,.16);
+    transition:transform .06s ease, box-shadow .2s ease, background .2s ease, color .2s ease, outline-color .2s ease;
+  }
+  .piece .emoji{ font-size:18px; line-height:1; }
+  .piece .label{ font-size:13px; line-height:1; }
+  .piece[data-side="self"]{background:var(--brand); color:#fff; border-color:var(--brand-dark);}
+  .piece[data-side="enemy"]{background:#fff8e1; color:#0f172a;}
+
+  .piece.selecting{
+    outline:3px solid var(--brand);
+    box-shadow:0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent);
+  }
+
+  /* 敵駒の「捕獲候補」強調 */
+  .capturable-safe{ outline:3px solid var(--brand); box-shadow:0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent); }
+  .capturable-danger{ outline:3px solid var(--danger); box-shadow:0 0 0 4px color-mix(in oklab, var(--danger) 25%, transparent); }
+
+  /* 可視化用オーバーレイ（空点への移動） */
+  .mv-overlay{
+    position:absolute; width:34px; height:34px; margin-left:-17px; margin-top:-17px;
+    border-radius:50%; border:2px solid; display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:700; pointer-events:auto;
+    transition:transform .06s ease, background .2s ease, color .2s ease, border-color .2s ease;
+  }
+  .mv-safe{ border-color:var(--brand); background:color-mix(in oklab, var(--brand) 18%, transparent); color:#1e40af; cursor:pointer; }
+  .mv-danger{ border-color:var(--danger); background:color-mix(in oklab, var(--danger) 18%, transparent); color:var(--danger-dark); cursor:not-allowed; }
+  .mv-safe:active{ transform:scale(.96); }
+
+  .btn{
+    appearance:none; border:none; background:#1f2937; color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer;
+    min-height:44px; font-weight:700;
+    transition:opacity .15s ease, transform .06s ease, background .2s ease;
+  }
+  .btn.secondary{background:#334155;}
+  .btn:disabled{opacity:.55; cursor:not-allowed;}
+  .btn:active{ transform:scale(.98); }
+  .btn-row{display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;}
+
+  textarea{
+    width:100%; height:140px;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    border-radius:10px; border:1px solid var(--panel-border); background:var(--panel); color:var(--ink);
+    padding:10px; outline:none;
+  }
+
+  .out pre{
+    white-space:pre-wrap; word-break:break-word;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    background:#0b1020; color:#e5e7eb; padding:10px 12px; border-radius:10px; max-height:420px; overflow:auto;
+  }
+  @media (prefers-color-scheme: dark){
+    .out pre{background:#0a0f1a; color:#dbe3f4;}
+  }
+
+  .tag{
+    display:inline-flex; align-items:center; gap:6px; background:#eef2ff; color:#3730a3;
+    padding:2px 8px; border-radius:9999px; font-size:12px; font-weight:700;
+  }
+  @media (prefers-color-scheme: dark){
+    .tag{ background:#172554; color:#c7d2fe; }
+  }
+
+  /* 捕獲合計バッジ（右下固定） */
+  .cap-badge{
+    position:absolute; right:12px; bottom:12px;
+    background:#111827; color:#fff; font-weight:800; font-size:12px;
+    padding:6px 10px; border-radius:9999px; box-shadow:0 2px 6px rgba(0,0,0,.25);
+    opacity:.96; pointer-events:none;
+  }
+
+  /* 青い光エフェクト（将軍＆将撃破後の自分） */
+  .glow-blue{
+    box-shadow: 0 0 0 0 rgba(37,99,235,.55);
+    animation: pulse-blue 1.8s ease-out infinite;
+  }
+  .glow-blue-strong{
+    outline:3px solid var(--brand);
+    box-shadow: 0 0 0 0 rgba(37,99,235,.7), 0 0 16px 4px rgba(37,99,235,.25);
+    animation: pulse-blue 1.6s ease-out infinite;
+  }
+  @keyframes pulse-blue{
+    0%   { box-shadow: 0 0 0 0 rgba(37,99,235,.55), 0 0 16px 4px rgba(37,99,235,.2); }
+    60%  { box-shadow: 0 0 0 14px rgba(37,99,235,0), 0 0 8px 2px rgba(37,99,235,.28); }
+    100% { box-shadow: 0 0 0 0 rgba(37,99,235,0),  0 0 0 0 rgba(37,99,235,0); }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .piece, .mv-overlay, .btn { transition:none !important; }
+    .glow-blue, .glow-blue-strong{ animation:none !important; }
+  }
+</style>
+</head>
+<body>
+  <h1>8×9交点盤：<span class="tag">車</span> ターン可視化＆タップ捕獲（安全判定付き）</h1>
+  <div class="app">
+    <div class="left">
+      <div class="panel">
+        <div class="legend" style="margin-bottom:6px;">
+          ① トレイから「相手の駒」を <b>ドラッグ</b>（PC） / <b>タップ選択→盤タップ</b>（スマホ）で配置 → 準備できたら <b>ターン終了</b> を押してください
+        </div>
+        <div class="tray" id="tray" role="group" aria-label="相手の駒トレイ"></div>
+
+        <div class="btn-row" style="margin-top:8px;">
+          <button id="endTurnBtn" class="btn">ターン終了（可視化）</button>
+          <button id="clearBoard" class="btn secondary">盤をクリア</button>
+        </div>
+
+        <div class="legend" style="margin-top:10px;">
+          <label><input type="checkbox" id="blocklessSweep" checked />
+            将の能力：ブロック無視（次手で縦横の敵を全部倒す）
+          </label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="legend" style="margin-bottom:6px;">② 盤（交点に駒を置く）</div>
+        <div class="board-wrap">
+          <div id="board" class="board"></div>
+          <div id="capBadge" class="cap-badge">捕獲: 0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="legend" style="margin-bottom:6px;">③ メッセージ</div>
+      <div class="out" id="output"><pre>トレイから相手の駒を置き、「ターン終了」を押すと可視化されます。</pre></div>
+
+      <div class="legend" style="margin:10px 0 6px;">④ 局面の保存 / 復元（JSON）</div>
+      <textarea id="jsonBox" placeholder="局面JSONがここに入ります"></textarea>
+      <div class="btn-row">
+        <button id="saveJson" class="btn secondary">JSON保存</button>
+        <button id="loadJson" class="btn secondary">JSON読込</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ============================================================
+   8×9交点盤（自分＝車：ターン終了→可視化→クリック移動/捕獲）
+   ビジュアル強化：
+   - 各駒に絵文字＋ラベル
+   - 将（将軍）は常時青い光
+   - 将撃破後は自分（車）に青い光（次手の一掃が終わるまで）
+============================================================ */
+
+/* === 基本定数 === */
+const NX = 8;
+const NY = 9;
+const TYPES = ["卒","士","象","砲","馬","車","将"];
+const SIDE = { SELF: "self", ENEMY: "enemy" };
+
+/* === DOM === */
+const boardEl = document.getElementById('board');
+const trayEl = document.getElementById('tray');
+const outputEl = document.getElementById('output').querySelector('pre');
+const endTurnBtn = document.getElementById('endTurnBtn');
+const clearBoardBtn = document.getElementById('clearBoard');
+const blocklessSweepInput = document.getElementById('blocklessSweep');
+const capBadgeEl = document.getElementById('capBadge');
+const saveJsonBtn = document.getElementById('saveJson');
+const loadJsonBtn = document.getElementById('loadJson');
+const jsonBox = document.getElementById('jsonBox');
+
+/* === 状態 === */
+let state = {
+  pieces: [
+    { id: 1, type:"車", side: SIDE.SELF, x:3, y:5 }
+  ],
+  nextSweep: false,     // 将を取った次手での一掃フラグ（これが true の間 自分に青い光）
+  _idSeq: 2,
+  capturedTotal: 0,     // 捕獲累計
+  selfTurnReady: false, // 可視化中＝自手で動ける状態
+  ui: {
+    pendingPlace: null,   // {type, side} トレイからの配置モード
+    pendingMoveId: null,  // 盤上の敵駒移動（可視化前の編集）
+  }
+};
+
+// 補助
+function inBounds(x,y){ return x>=0 && x<NX && y>=0 && y<NY; }
+function key(x,y){ return `${x},${y}`; }
+function xyToPos(x, y){
+  const rect = boardEl.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  const sx = (NX<=1) ? 0 : x / (NX-1);
+  const sy = (NY<=1) ? 0 : y / (NY-1);
+  return { left: sx * w, top: sy * h };
+}
+function getPieceAt(st, x,y){ return st.pieces.find(p=>p.x===x && p.y===y); }
+function cloneState(st){
+  return {
+    pieces: st.pieces.map(p=>({ ...p })),
+    nextSweep: st.nextSweep,
+    _idSeq: st._idSeq,
+    capturedTotal: st.capturedTotal,
+    selfTurnReady: st.selfTurnReady,
+    ui: JSON.parse(JSON.stringify(st.ui))
+  };
+}
+
+/* === 駒のビジュアル（絵文字＋ラベル） === */
+function typeToVisual(type, side){
+  // 側によらず同じ絵文字。自駒は背景色が青になる。
+  switch(type){
+    case "卒": return { emoji: "🪖", label: "卒", title: "卒（一般兵）" };
+    case "士": return { emoji: "🧠", label: "士", title: "士（諸葛孔明）" };
+    case "象": return { emoji: "🐘", label: "象", title: "象" };
+    case "砲": return { emoji: "💣", label: "砲", title: "砲（大砲）" };
+    case "馬": return { emoji: "🐎", label: "馬", title: "馬" };
+    case "車": return { emoji: "🛺", label: "車", title: "車（人力車/手押し車）" };
+    case "将": return { emoji: "🪖", label: "将", title: "将（将軍）" };
+    default:   return { emoji: "⬤", label: type, title: type };
+  }
+}
+
+/* === 盤／トレイ描画 === */
+function renderTray(){
+  trayEl.innerHTML = "";
+  for(const t of TYPES){
+    const chip = document.createElement('button');
+    chip.type = "button";
+    chip.className = 'piece-chip';
+    const vis = typeToVisual(t, SIDE.ENEMY);
+    chip.textContent = `${vis.emoji} ${vis.label}`;
+    chip.dataset.side = SIDE.ENEMY;
+    chip.setAttribute('aria-pressed', 'false');
+    chip.title = `トレイ: ${vis.title}`;
+
+    // PCドラッグ用
+    chip.draggable = true;
+    chip.addEventListener('dragstart', e=>{
+      e.dataTransfer.setData('text/plain', JSON.stringify({ from:"tray", type:t, side:SIDE.ENEMY }));
+    });
+
+    // スマホ向け：タップで選択→盤タップで配置
+    chip.addEventListener('click', ()=>{
+      const isSame = state.ui.pendingPlace && state.ui.pendingPlace.type === t;
+      state.ui.pendingPlace = isSame ? null : { type: t, side: SIDE.ENEMY };
+      [...trayEl.querySelectorAll('.piece-chip')].forEach(el=>{
+        el.classList.remove('selected');
+        el.setAttribute('aria-pressed','false');
+      });
+      if(state.ui.pendingPlace){
+        chip.classList.add('selected');
+        chip.setAttribute('aria-pressed','true');
+        outputEl.textContent = `配置モード: 敵駒（${t}）→ 盤の交点をタップしてください。`;
+      }else{
+        outputEl.textContent = `配置モード解除。`;
+      }
+    });
+
+    trayEl.appendChild(chip);
+  }
+}
+
+function renderGrid(){
+  boardEl.innerHTML = "";
+  const rect = boardEl.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  for(let i=0;i<NX;i++){
+    const v = document.createElement('div'); v.className='vline';
+    v.style.left = `${w * (i/(NX-1))}px`; v.style.width='2px'; v.style.top='0'; v.style.bottom='0';
+    boardEl.appendChild(v);
+  }
+  for(let j=0;j<NY;j++){
+    const hline = document.createElement('div'); hline.className='hline';
+    hline.style.top = `${h * (j/(NY-1))}px`; hline.style.height='2px'; hline.style.left='0'; hline.style.right='0';
+    boardEl.appendChild(hline);
+  }
+
+  for(let y=0;y<NY;y++){
+    for(let x=0;x<NX;x++){
+      const {left, top} = xyToPos(x,y);
+      const pt = document.createElement('div');
+      pt.className='pt';
+      pt.style.left = `${left}px`; pt.style.top=`${top}px`;
+      boardEl.appendChild(pt);
+
+      const cell = document.createElement('div');
+      cell.className='cell';
+      cell.style.left = `${left}px`; cell.style.top = `${top}px`;
+      cell.dataset.x = x; cell.dataset.y = y;
+
+      // PCドラッグ受け入れ
+      cell.addEventListener('dragover', e=>{ e.preventDefault(); }, {passive:true});
+      cell.addEventListener('drop', onDropToCell);
+
+      // スマホ：タップで配置/移動（編集）
+      cell.addEventListener('click', ()=>{
+        const x = parseInt(cell.dataset.x,10);
+        const y = parseInt(cell.dataset.y,10);
+        const occ = getPieceAt(state, x,y);
+
+        if(state.selfTurnReady){
+          outputEl.textContent = "可視化中は配置編集できません（可視化解除後に編集してください）。";
+          return;
+        }
+
+        if(state.ui.pendingPlace){
+          if(occ){ outputEl.textContent = "そこには置けません（既に駒があります）。"; return; }
+          const np = { id: state._idSeq++, type: state.ui.pendingPlace.type, side: SIDE.ENEMY, x, y };
+          state.pieces.push(np);
+          renderPieces();
+          outputEl.textContent = `敵駒（${np.type}）を配置しました。`;
+          return;
+        }
+
+        if(state.ui.pendingMoveId){
+          if(occ){ outputEl.textContent = "そこには移動できません（交点が埋まっています）。"; return; }
+          const p = state.pieces.find(q=>q.id===state.ui.pendingMoveId);
+          if(p && p.side===SIDE.ENEMY){
+            p.x=x; p.y=y;
+            state.ui.pendingMoveId = null;
+            renderPieces();
+            outputEl.textContent = "敵駒を移動しました。";
+          }else{
+            state.ui.pendingMoveId = null;
+          }
+          return;
+        }
+      });
+
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function clearTraySelection(){
+  state.ui.pendingPlace = null;
+  [...trayEl.querySelectorAll('.piece-chip')].forEach(el=>{
+    el.classList.remove('selected');
+    el.setAttribute('aria-pressed','false');
+  });
+}
+
+function renderPieces(){
+  // 駒DOMとオーバーレイの全消去（グリッド線は保持）
+  [...boardEl.querySelectorAll('.piece')].forEach(el=>el.remove());
+  [...boardEl.querySelectorAll('.mv-overlay')].forEach(el=>el.remove());
+
+  for(const p of state.pieces){
+    const {left, top} = xyToPos(p.x, p.y);
+    const el = document.createElement('div');
+    el.className = 'piece';
+    const vis = typeToVisual(p.type, p.side);
+    el.innerHTML = `<span class="emoji" aria-hidden="true">${vis.emoji}</span><span class="label">${vis.label}</span>`;
+    el.title = vis.title;
+    el.style.left = `${left}px`; el.style.top = `${top}px`;
+    el.dataset.id = p.id;
+    el.dataset.side = p.side;
+
+    // 将軍は常に青い光（敵味方に関わらずタイプで判定）
+    if(p.type === "将"){
+      el.classList.add('glow-blue-strong');
+    }
+
+    // 自分（車）は nextSweep 中に青い光（将軍撃破後〜次手の一掃終了まで）
+    if(p.side === SIDE.SELF && p.type === "車" && state.nextSweep){
+      el.classList.add('glow-blue');
+    }
+
+    // 敵はドラッグで再配置可（自ターン前の編集として）
+    if(p.side===SIDE.ENEMY){
+      el.draggable = true;
+      el.addEventListener('dragstart', (e)=>{
+        e.dataTransfer.setData('text/plain', JSON.stringify({ from:"board", id:p.id }));
+      });
+
+      // クリック：可視化中→捕獲処理 / 可視化前→編集モード
+      el.addEventListener('click', ()=>{
+        if(state.selfTurnReady){
+          const me = getSelf();
+          if(!me) return;
+          const capt = capturableInfo(p, me);
+          if(!capt.ok){
+            outputEl.textContent = "そこはだめです（一直線＆途中詰まりが必要）。";
+            return;
+          }
+          const danger = isDangerAfterMove(state, {x:p.x, y:p.y}, p.id);
+          if(danger){
+            outputEl.textContent = "そこはだめです（敵の攻撃範囲）。";
+            return;
+          }
+          doSelfMoveOrCapture({ x:p.x, y:p.y, captureId: p.id });
+          return;
+        }
+
+        // 可視化前：編集（移動先をセルで選ぶ）
+        if(state.ui.pendingMoveId === p.id){
+          state.ui.pendingMoveId = null;
+          el.classList.remove('selecting');
+          outputEl.textContent = "移動モードを解除しました。";
+        }else{
+          [...boardEl.querySelectorAll('.piece')].forEach(n=>n.classList.remove('selecting'));
+          state.ui.pendingMoveId = p.id;
+          el.classList.add('selecting');
+          outputEl.textContent = `敵駒（${p.type}）の移動先を交点タップで指定してください。`;
+        }
+      });
+    }
+
+    boardEl.appendChild(el);
+  }
+
+  // 可視化中は敵駒に安全/危険の輪郭を付与
+  if(state.selfTurnReady){
+    const reach = computeReachables();
+    decorateCapturables(reach.captures);
+    renderMoveOverlay(reach.empty);
+  }
+}
+
+/* === セルへのドロップ（トレイ→盤、敵駒の移動） === */
+function onDropToCell(e){
+  e.preventDefault();
+  const payload = JSON.parse(e.dataTransfer.getData('text/plain'));
+  const x = parseInt(this.dataset.x,10);
+  const y = parseInt(this.dataset.y,10);
+  const occ = getPieceAt(state, x,y);
+
+  if(payload.from==="tray"){
+    if(occ) return;
+    const np = { id: state._idSeq++, type: payload.type, side: SIDE.ENEMY, x, y };
+    state.pieces.push(np);
+    renderPieces();
+    outputEl.textContent = `敵駒（${np.type}）を配置しました。`;
+    return;
+  }
+
+  if(payload.from==="board"){
+    const id = payload.id;
+    const p = state.pieces.find(q=>q.id===id);
+    if(!p) return;
+    if(p.side===SIDE.ENEMY){
+      if(occ) return; // 敵同士の重なり禁止
+      p.x = x; p.y = y;
+      state.ui.pendingMoveId = null;
+      renderPieces();
+      outputEl.textContent = `敵駒（${p.type}）を移動しました。`;
+    }
+  }
+}
+
+/* === 可視化：到達範囲を計算 === */
+function getSelf(){ return state.pieces.find(p=>p.side===SIDE.SELF && p.type==="車"); }
+
+const DIRS_ORTH = [[1,0],[-1,0],[0,1],[0,-1]];
+const DIRS_DIAG = [[1,1],[1,-1],[-1,1],[-1,-1]];
+
+function rayToBlock(st, x,y, dx,dy){
+  const res=[];
+  let cx=x+dx, cy=y+dy;
+  while(inBounds(cx,cy)){
+    const occ = getPieceAt(st,cx,cy);
+    if(occ) break;
+    res.push({x:cx,y:cy});
+    cx+=dx; cy+=dy;
+  }
+  return res;
+}
+function firstBlock(st, x,y, dx,dy){
+  let cx=x+dx, cy=y+dy;
+  while(inBounds(cx,cy)){
+    const occ = getPieceAt(st,cx,cy);
+    if(occ) return {x:cx, y:cy, piece:occ};
+    cx+=dx; cy+=dy;
+  }
+  return null;
+}
+
+function computeReachables(){
+  const me = getSelf();
+  const empty = [];
+  const captures = []; // { id, safe }
+  if(!me) return { empty, captures };
+
+  for(const [dx,dy] of DIRS_ORTH){
+    const cells = rayToBlock(state, me.x, me.y, dx,dy);
+    for(const c of cells){
+      const danger = isDangerAfterMove(state, {x:c.x, y:c.y}, null);
+      empty.push({ x:c.x, y:c.y, safe: !danger });
+    }
+    const b = firstBlock(state, me.x, me.y, dx,dy);
+    if(b && b.piece.side===SIDE.ENEMY){
+      const danger = isDangerAfterMove(state, {x:b.x, y:b.y}, b.piece.id);
+      captures.push({ id: b.piece.id, safe: !danger });
+    }
+  }
+  return { empty, captures };
+}
+
+/* === 危険判定（その座標へ移動したら倒され得るか） === */
+function pieceAttacks(st, p){
+  const res=[];
+  switch(p.type){
+    case "卒":{
+      for (const [dx, dy] of DIRS_ORTH) {
+        const nx = p.x + dx, ny = p.y + dy;
+        if (inBounds(nx, ny)) res.push({ x: nx, y: ny });
+      }
+      break;
+    }
+    case "士":{
+      for(const [dx,dy] of DIRS_DIAG){
+        const nx=p.x+dx, ny=p.y+dy;
+        if(inBounds(nx,ny)) res.push({x:nx,y:ny});
+      }
+      break;
+    }
+    case "象":{
+      for(const [dx,dy] of DIRS_DIAG){
+        const mx=p.x+dx, my=p.y+dy;
+        const nx=p.x+2*dx, ny=p.y+2*dy;
+        if(inBounds(nx,ny) && !getPieceAt(st,mx,my)) res.push({x:nx,y:ny});
+      }
+      break;
+    }
+    case "砲":{
+      for(const [dx,dy] of DIRS_ORTH){
+        let cx=p.x+dx, cy=p.y+dy, screens=0;
+        while(inBounds(cx,cy)){
+          const occ = getPieceAt(st,cx,cy);
+          if(occ){
+            screens++;
+            if(screens===1){
+              cx+=dx; cy+=dy;
+              while(inBounds(cx,cy)){
+                res.push({x:cx,y:cy});
+                const occ2 = getPieceAt(st,cx,cy);
+                if(occ2){ break; }
+                cx+=dx; cy+=dy;
+              }
+              break;
+            }else{
+              break;
+            }
+          }
+          cx+=dx; cy+=dy;
+        }
+      }
+      break;
+    }
+    case "馬":{
+      const legs = [
+        {b:[1,0], tips:[[1,1],[1,-1]]},
+        {b:[-1,0], tips:[[-1,1],[-1,-1]]},
+        {b:[0,1], tips:[[1,1],[-1,1]]},
+        {b:[0,-1], tips:[[1,-1],[-1,-1]]},
+      ];
+      for(const leg of legs){
+        const lx=p.x+leg.b[0], ly=p.y+leg.b[1];
+        if(!inBounds(lx,ly)) continue;
+        if(getPieceAt(st,lx,ly)) continue; // 足詰まり
+        for(const t of leg.tips){
+          const tx=p.x+leg.b[0]+t[0], ty=p.y+leg.b[1]+t[1];
+          if(inBounds(tx,ty)) res.push({x:tx,y:ty});
+        }
+      }
+      break;
+    }
+    case "車":{
+      for(const [dx,dy] of DIRS_ORTH){
+        let cx=p.x+dx, cy=p.y+dy;
+        while(inBounds(cx,cy)){
+          const occ = getPieceAt(st,cx,cy);
+          res.push({x:cx,y:cy});
+          if(occ){ break; }
+          cx+=dx; cy+=dy;
+        }
+      }
+      break;
+    }
+    case "将":{
+      for(const [dx,dy] of DIRS_ORTH){
+        const nx=p.x+dx, ny=p.y+dy;
+        if(inBounds(nx,ny)) res.push({x:nx,y:ny});
+      }
+      break;
+    }
+  }
+  return res;
+}
+function attackedSquares(st){
+  const atk = new Set();
+  for(const p of st.pieces){
+    if(p.side !== SIDE.ENEMY) continue;
+    for(const a of pieceAttacks(st, p)){
+      atk.add(key(a.x, a.y));
+    }
+  }
+  return atk;
+}
+function isDangerAfterMove(st, to, captureId=null){
+  const tmp = cloneState(st);
+  if(captureId){
+    tmp.pieces = tmp.pieces.filter(p => p.id !== captureId);
+  }
+  const me = tmp.pieces.find(p=>p.side===SIDE.SELF && p.type==="車");
+  if(!me) return false;
+  me.x = to.x; me.y = to.y;
+  const atk = attackedSquares(tmp);
+  return atk.has(key(to.x, to.y));
+}
+
+/* === 可視化の描画 === */
+function clearOverlays(){
+  [...boardEl.querySelectorAll('.mv-overlay')].forEach(el=>el.remove());
+  [...boardEl.querySelectorAll('.piece')].forEach(el=>{
+    el.classList.remove('capturable-safe','capturable-danger','selecting');
+  });
+}
+function renderMoveOverlay(emptyList){
+  for(const e of emptyList){
+    const {left, top} = xyToPos(e.x, e.y);
+    const ov = document.createElement('div');
+    ov.className = `mv-overlay ${e.safe?'mv-safe':'mv-danger'}`;
+    ov.style.left = `${left}px`; ov.style.top = `${top}px`;
+    ov.textContent = e.safe ? "●" : "×";
+    if(e.safe){
+      ov.addEventListener('click', ()=>{
+        doSelfMoveOrCapture({ x:e.x, y:e.y, captureId: null });
+      }, {passive:true});
+    }
+    boardEl.appendChild(ov);
+  }
+}
+function decorateCapturables(captList){
+  for(const c of captList){
+    const el = [...boardEl.querySelectorAll('.piece')]
+      .find(n => Number(n.dataset.id)===c.id);
+    if(!el) continue;
+    el.classList.add(c.safe ? 'capturable-safe':'capturable-danger');
+  }
+}
+
+/* === キャプチャ可能性（一直線＆途中詰まりなし＆最初の敵であること） === */
+function capturableInfo(enemyPiece, me){
+  if(enemyPiece.side!==SIDE.ENEMY) return { ok:false };
+  if(!(me.x===enemyPiece.x || me.y===enemyPiece.y)) return { ok:false };
+  if(me.x===enemyPiece.x){
+    const step = (enemyPiece.y>me.y)?1:-1;
+    for(let y=me.y+step; y!==enemyPiece.y; y+=step){
+      if(getPieceAt(state, me.x, y)) return { ok:false };
+    }
+  }else{
+    const step = (enemyPiece.x>me.x)?1:-1;
+    for(let x=me.x+step; x!==enemyPiece.x; x+=step){
+      if(getPieceAt(state, x, me.y)) return { ok:false };
+    }
+  }
+  const dir = [Math.sign(enemyPiece.x-me.x), Math.sign(enemyPiece.y-me.y)];
+  const b = firstBlock(state, me.x, me.y, dir[0], dir[1]);
+  if(!b || b.piece.id!==enemyPiece.id) return { ok:false };
+  return { ok:true };
+}
+
+/* === 実行：自分の移動／捕獲（一掃も反映） === */
+function doSelfMoveOrCapture({ x, y, captureId }){
+  const me = getSelf();
+  if(!me) return;
+
+  const danger = isDangerAfterMove(state, {x,y}, captureId);
+  if(danger){
+    outputEl.textContent = "そこはだめです（敵の攻撃範囲）。";
+    return;
+  }
+
+  // 捕獲
+  if(captureId){
+    const target = state.pieces.find(p=>p.id===captureId);
+    if(target){
+      if(target.type==="将"){
+        state.nextSweep = true; // 次手で一掃 → 同時に自分に青い光（renderPiecesで反映）
+      }
+      state.pieces = state.pieces.filter(p=>p.id!==target.id);
+      state.capturedTotal += 1;
+    }
+  }
+
+  // 移動
+  me.x = x; me.y = y;
+
+  // 将撃破「次手」での一掃（解除タイミングで青い光も消える）
+  if(state.nextSweep === true && captureId === null){
+    const removed = applySweepIfAny(state, {x,y}, !!blocklessSweepInput.checked);
+    if(removed>0) state.capturedTotal += removed;
+    state.nextSweep = false;
+  }
+
+  // ターン終了（可視化解除 + 編集解除）
+  state.selfTurnReady = false;
+  state.ui.pendingMoveId = null;
+  clearTraySelection();
+
+  updateCaptureBadge();
+  clearOverlays();
+  renderPieces();
+  outputEl.textContent = captureId ? "捕獲しました。" : "移動しました。";
+}
+
+// 将撃破後の一掃（戻り値：取り除いた敵駒の数）
+function applySweepIfAny(st, landing, blockless=true){
+  const isEnemy = (p)=>p.side===SIDE.ENEMY;
+  const victims = [];
+  if(blockless){
+    for(const p of st.pieces){
+      if(isEnemy(p) && (p.x===landing.x || p.y===landing.y)) victims.push(p.id);
+    }
+  }else{
+    for(const [dx,dy] of DIRS_ORTH){
+      let cx=landing.x+dx, cy=landing.y+dy;
+      while(inBounds(cx,cy)){
+        const occ = getPieceAt(st,cx,cy);
+        if(occ){ if(isEnemy(occ)) victims.push(occ.id); break; }
+        cx+=dx; cy+=dy;
+      }
+    }
+  }
+  if(victims.length){
+    st.pieces = st.pieces.filter(p=>!victims.includes(p.id));
+  }
+  return victims.length;
+}
+
+/* === ボタンイベント === */
+endTurnBtn.addEventListener('click', ()=>{
+  state.selfTurnReady = true;
+  state.ui.pendingMoveId = null;
+  clearTraySelection();
+
+  clearOverlays();
+  renderPieces(); // 可視化生成
+  const reach = computeReachables();
+  const safeCount = reach.empty.filter(e=>e.safe).length + reach.captures.filter(c=>c.safe).length;
+  if(safeCount===0){
+    outputEl.textContent = "安全に行ける場所がありません（全て危険）。";
+  }else{
+    outputEl.textContent = "青＝安全／赤＝危険。青い丸（空点）か青い輪郭の敵駒をタップ/クリックできます。";
+  }
+});
+
+clearBoardBtn.addEventListener('click', ()=>{
+  state.pieces = state.pieces.filter(p=>p.side===SIDE.SELF);
+  state.nextSweep = false;
+  state.selfTurnReady = false;
+  state.capturedTotal = 0;
+  state.ui.pendingMoveId = null;
+  clearTraySelection();
+
+  clearOverlays();
+  renderPieces();
+  updateCaptureBadge();
+  outputEl.textContent = "盤をクリアしました（自分の車のみ残し、カウントもリセット）。";
+});
+
+saveJsonBtn.addEventListener('click', ()=>{
+  const data = {
+    pieces: state.pieces,
+    nextSweep: state.nextSweep,
+    capturedTotal: state.capturedTotal
+  };
+  jsonBox.value = JSON.stringify(data, null, 2);
+  outputEl.textContent = "JSONを保存しました。";
+});
+loadJsonBtn.addEventListener('click', ()=>{
+  try{
+    const data = JSON.parse(jsonBox.value);
+    if(!Array.isArray(data.pieces)) throw new Error();
+
+    let pieces = data.pieces.slice();
+    const hasSelf = pieces.some(p=>p.side===SIDE.SELF && p.type==="車");
+    if(!hasSelf){
+      pieces.unshift({ id:1, type:"車", side:SIDE.SELF, x:3, y:5 });
+    }
+    state.pieces = pieces.map((p,i)=> ({ id: p.id ?? (i+1), ...p }));
+    state._idSeq = Math.max(1, ...state.pieces.map(p=>p.id||0)) + 1;
+    state.nextSweep = !!data.nextSweep;
+    state.capturedTotal = Number.isFinite(data.capturedTotal) ? data.capturedTotal : 0;
+    state.selfTurnReady = false;
+
+    state.ui.pendingMoveId = null;
+    clearTraySelection();
+
+    clearOverlays();
+    renderPieces();
+    updateCaptureBadge();
+    outputEl.textContent = "JSONを読み込みました。";
+  }catch(e){
+    alert("JSONの形式が不正です。");
+  }
+});
+
+/* === 初期化 === */
+function updateCaptureBadge(){ capBadgeEl.textContent = `捕獲: ${state.capturedTotal}`; }
+
+renderTray();
+renderGrid();
+renderPieces();
+updateCaptureBadge();
+
+window.addEventListener('resize', ()=>{ renderGrid(); renderPieces(); }, {passive:true});
+</script>
+</body>
+</html>
