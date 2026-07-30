@@ -2,14 +2,15 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1.0,user-scalable=no" />
 <title>8×9 交点盤：ターン終了→可視化→移動/捕獲（車）</title>
 <meta name="color-scheme" content="light dark" />
 <style>
   :root{
     --board-size-x: 8; /* 横線本数 */
     --board-size-y: 9; /* 縦線本数 */
-    --cell: clamp(36px, 8.5vw, 64px);
+    /* スマホ画面で可能な限り見やすく収めるサイズ計算 */
+    --cell: clamp(38px, calc((100vw - 36px) / var(--board-size-x)), 60px);
 
     --grid-w: calc(var(--cell) * (var(--board-size-x) - 1));
     --grid-h: calc(var(--cell) * (var(--board-size-y) - 1));
@@ -19,215 +20,435 @@
     --brand-dark: #1d4ed8;
     --danger: #ef4444;
     --danger-dark: #b91c1c;
-    --ink: #222;
+    --ink: #0f172a;
     --ink-weak: #475569;
-    --bg: #f7f7fb;
+    --bg: #f1f5f9;
     --panel: #ffffff;
-    --panel-border: #e5e7eb;
+    --panel-border: #cbd5e1;
     --muted: #94a3b8;
   }
 
   @media (prefers-color-scheme: dark){
     :root{
-      --bg: #0b1020;
-      --panel: #101526;
-      --panel-border: #1f273f;
-      --ink: #e5e7eb;
-      --ink-weak: #9aa6c0;
-      --muted: #64748b;
+      --bg: #090d16;
+      --panel: #111827;
+      --panel-border: #1f2937;
+      --ink: #f8fafc;
+      --ink-weak: #94a3b8;
+      --muted: #475569;
     }
   }
 
-  html, body { height: 100%; }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
   body{
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN",
                  "Yu Gothic", "Noto Sans JP", sans-serif;
-    margin:0; color:var(--ink); background:var(--bg);
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
-             max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    color: var(--ink);
+    background: var(--bg);
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+             max(16px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    user-select: none;
+    -webkit-user-select: none;
   }
-  h1{font-size:clamp(18px, 2.8vw, 22px); margin:0 0 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+
+  h1{
+    font-size: clamp(16px, 4vw, 20px);
+    margin: 0 0 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    line-height: 1.3;
+  }
+
   .app{
-    display:grid; gap:16px; align-items:start;
+    display: grid;
+    gap: 14px;
+    align-items: start;
     grid-template-columns: 1fr;
+    max-width: 960px;
+    margin: 0 auto;
   }
   @media (min-width: 980px){
     .app{ grid-template-columns: auto 360px; }
   }
+
   .left{
-    display:grid; gap:16px; align-items:start;
+    display: grid;
+    gap: 14px;
+    align-items: start;
     grid-template-columns: 1fr;
-  }
-  @media (min-width: 980px){
-    .left{ grid-template-columns: auto auto; }
   }
 
   .panel{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:14px; padding:12px;
-    box-shadow:0 2px 10px rgba(0,0,0,.08);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.05);
   }
-  .legend{font-size:13px; color:var(--ink-weak);}
 
-  .tray{display:flex; gap:10px; flex-wrap:wrap;}
+  .legend{
+    font-size: 13px;
+    color: var(--ink-weak);
+    line-height: 1.5;
+  }
+
+  /* --- トレイと配置チップ（スマホ向けに押しやすく） --- */
+  .tray{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
   .piece-chip{
-    display:inline-flex; align-items:center; justify-content:center;
-    min-width:44px; min-height:44px; padding:6px 10px; border-radius:9999px;
-    border:1px solid #cbd5e1; background:#fff; cursor:pointer; user-select:none; font-weight:700;
-    transition:transform .06s ease, box-shadow .2s ease, background .2s ease, color .2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    height: 42px;
+    padding: 4px 10px;
+    border-radius: 10px;
+    border: 1.5px solid var(--panel-border);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 14px;
+    transition: all .15s ease;
   }
-  .piece-chip[data-side="enemy"]{ background:#fef7e8; }
+  .piece-chip[data-side="enemy"]{
+    background: #fffcf0;
+    border-color: #fde68a;
+    color: #92400e;
+  }
+  @media (prefers-color-scheme: dark){
+    .piece-chip[data-side="enemy"]{
+      background: #231f10;
+      border-color: #854d0e;
+      color: #fde047;
+    }
+  }
   .piece-chip.selected{
-    outline:3px solid var(--brand);
-    box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent);
+    border-color: var(--brand);
+    outline: 2px solid var(--brand);
+    background: color-mix(in oklab, var(--brand) 12%, var(--panel));
+    color: var(--brand-dark);
   }
-  .piece-chip:active{ transform:scale(.96); }
+  .piece-chip:active{ transform: scale(.94); }
 
+  /* --- 盤面（スクロール崩れ＆指かけ防止） --- */
   .board-wrap{
-    position:relative;
-    width:calc(var(--grid-w) + var(--cell));
-    height:calc(var(--grid-h) + var(--cell));
-    background:linear-gradient(var(--panel),var(--panel));
-    border-radius:14px; border:1px solid var(--panel-border);
-    box-shadow:0 2px 12px rgba(0,0,0,.1); overflow:hidden; padding:8px;
-    margin-inline:auto;
-    touch-action:manipulation;
+    position: relative;
+    width: calc(var(--grid-w) + var(--cell));
+    height: calc(var(--grid-h) + var(--cell));
+    background: var(--panel);
+    border-radius: 12px;
+    border: 1px solid var(--panel-border);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.04);
+    overflow: hidden;
+    padding: 8px;
+    margin-inline: auto;
+    touch-action: manipulation;
   }
   .board{
-    position:relative;
-    width:calc(var(--grid-w) + var(--cell) - 16px);
-    height:calc(var(--grid-h) + var(--cell) - 16px);
-    margin:auto;
+    position: relative;
+    width: calc(var(--grid-w) + var(--cell) - 16px);
+    height: calc(var(--grid-h) + var(--cell) - 16px);
+    margin: auto;
   }
-  .board .vline, .board .hline{position:absolute; background:var(--muted); opacity:.8;}
-  .board .vline{width:2px; top:0; bottom:0;}
-  .board .hline{height:2px; left:0; right:0;}
-  .pt{position:absolute; width:14px; height:14px; margin-left:-7px; margin-top:-7px; background:#0f172a; border-radius:50%; opacity:.18; pointer-events:none;}
-  @media (prefers-color-scheme: dark){ .pt{opacity:.28;} }
-  .cell{position:absolute; width:36px; height:36px; margin-left:-18px; margin-top:-18px;}
-  @media (min-width: 640px){
-    .cell{ width:42px; height:42px; margin-left:-21px; margin-top:-21px; }
+  .board .vline, .board .hline{
+    position: absolute;
+    background: var(--muted);
+    opacity: .5;
+  }
+  .board .vline{width: 2px; top: 0; bottom: 0;}
+  .board .hline{height: 2px; left: 0; right: 0;}
+
+  .pt{
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    margin-top: -5px;
+    background: var(--ink);
+    border-radius: 50%;
+    opacity: .2;
+    pointer-events: none;
+  }
+  .cell{
+    position: absolute;
+    width: var(--cell);
+    height: var(--cell);
+    margin-left: calc(var(--cell) * -0.5);
+    margin-top: calc(var(--cell) * -0.5);
+    z-index: 10;
   }
 
+  /* --- 駒（タップ視覚効果強化） --- */
   .piece{
-    position:absolute; width:46px; height:46px; margin-left:-23px; margin-top:-23px;
-    display:flex; align-items:center; justify-content:center; gap:4px;
-    background:white; border:2px solid var(--muted); border-radius:50%; font-weight:800;
-    user-select:none; box-shadow:0 4px 10px rgba(0,0,0,.16);
-    transition:transform .06s ease, box-shadow .2s ease, background .2s ease, color .2s ease, outline-color .2s ease;
+    position: absolute;
+    width: calc(var(--cell) * 0.88);
+    height: calc(var(--cell) * 0.88);
+    margin-left: calc(var(--cell) * -0.44);
+    margin-top: calc(var(--cell) * -0.44);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    background: var(--panel);
+    border: 2px solid var(--muted);
+    border-radius: 50%;
+    font-weight: 800;
+    box-shadow: 0 3px 8px rgba(0,0,0,.2);
+    transition: transform .08s ease, outline-color .2s ease;
+    z-index: 20;
   }
-  .piece .emoji{ font-size:18px; line-height:1; }
-  .piece .label{ font-size:13px; line-height:1; }
-  .piece[data-side="self"]{background:var(--brand); color:#fff; border-color:var(--brand-dark);}
-  .piece[data-side="enemy"]{background:#fff8e1; color:#0f172a;}
+  .piece .emoji{ font-size: clamp(14px, 3.8vw, 18px); line-height: 1; }
+  .piece .label{ font-size: clamp(10px, 2.4vw, 12px); line-height: 1; margin-top: 1px; }
+  
+  .piece[data-side="self"]{
+    background: var(--brand);
+    color: #fff;
+    border-color: var(--brand-dark);
+    z-index: 25;
+  }
+  .piece[data-side="enemy"]{
+    background: #fffef9;
+    color: #1e293b;
+    border-color: #e2e8f0;
+  }
+  @media (prefers-color-scheme: dark){
+    .piece[data-side="enemy"]{
+      background: #1e293b;
+      color: #f1f5f9;
+      border-color: #475569;
+    }
+  }
 
   .piece.selecting{
-    outline:3px solid var(--brand);
-    box-shadow:0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent);
+    outline: 3px solid var(--brand);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--brand) 25%, transparent);
+    transform: scale(1.08);
   }
 
-  /* 敵駒の「捕獲候補」強調 */
-  .capturable-safe{ outline:3px solid var(--brand); box-shadow:0 0 0 4px color-mix(in oklab, var(--brand) 25%, transparent); }
-  .capturable-danger{ outline:3px solid var(--danger); box-shadow:0 0 0 4px color-mix(in oklab, var(--danger) 25%, transparent); }
+  /* 捕獲候補駒の強調（スマホで一目でタップ可能と分かるように） */
+  .capturable-safe{
+    outline: 3px solid var(--brand);
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--brand) 30%, transparent);
+    cursor: pointer;
+  }
+  .capturable-danger{
+    outline: 3px solid var(--danger);
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--danger) 30%, transparent);
+  }
 
-  /* 可視化用オーバーレイ（空点への移動） */
+  /* 移動先マーカー（指で押しやすい領域設定） */
   .mv-overlay{
-    position:absolute; width:34px; height:34px; margin-left:-17px; margin-top:-17px;
-    border-radius:50%; border:2px solid; display:flex; align-items:center; justify-content:center;
-    font-size:14px; font-weight:700; pointer-events:auto;
-    transition:transform .06s ease, background .2s ease, color .2s ease, border-color .2s ease;
+    position: absolute;
+    width: calc(var(--cell) * 0.76);
+    height: calc(var(--cell) * 0.76);
+    margin-left: calc(var(--cell) * -0.38);
+    margin-top: calc(var(--cell) * -0.38);
+    border-radius: 50%;
+    border: 2.5px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 800;
+    pointer-events: auto;
+    z-index: 30;
+    transition: transform .08s ease;
   }
-  .mv-safe{ border-color:var(--brand); background:color-mix(in oklab, var(--brand) 18%, transparent); color:#1e40af; cursor:pointer; }
-  .mv-danger{ border-color:var(--danger); background:color-mix(in oklab, var(--danger) 18%, transparent); color:var(--danger-dark); cursor:not-allowed; }
-  .mv-safe:active{ transform:scale(.96); }
+  .mv-safe{
+    border-color: var(--brand);
+    background: color-mix(in oklab, var(--brand) 25%, transparent);
+    color: var(--brand);
+    cursor: pointer;
+  }
+  .mv-danger{
+    border-color: var(--danger);
+    background: color-mix(in oklab, var(--danger) 20%, transparent);
+    color: var(--danger);
+    cursor: not-allowed;
+  }
+  .mv-safe:active{ transform: scale(.88); }
 
+  /* --- ボタン類（スマホ用タッチエリアと操作性の最適化） --- */
   .btn{
-    appearance:none; border:none; background:#1f2937; color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer;
-    min-height:44px; font-weight:700;
-    transition:opacity .15s ease, transform .06s ease, background .2s ease;
+    appearance: none;
+    border: none;
+    background: var(--brand);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 12px;
+    cursor: pointer;
+    min-height: 48px;
+    font-weight: 700;
+    font-size: 15px;
+    flex: 1 1 auto;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(37,99,235,.2);
+    transition: opacity .15s ease, transform .08s ease, background .2s ease;
   }
-  .btn.secondary{background:#334155;}
-  .btn:disabled{opacity:.55; cursor:not-allowed;}
-  .btn:active{ transform:scale(.98); }
-  .btn-row{display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;}
+  .btn.secondary{
+    background: var(--panel-border);
+    color: var(--ink);
+    box-shadow: none;
+  }
+  @media (prefers-color-scheme: dark){
+    .btn.secondary{ background: #334155; color: #f8fafc; }
+  }
+  .btn:disabled{ opacity: .5; cursor: not-allowed; }
+  .btn:active{ transform: scale(.96); }
+
+  .btn-row{
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  /* --- チェックボックスなどのフォーム部 --- */
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--ink);
+  }
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--brand);
+  }
 
   textarea{
-    width:100%; height:140px;
-    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    border-radius:10px; border:1px solid var(--panel-border); background:var(--panel); color:var(--ink);
-    padding:10px; outline:none;
+    width: 100%;
+    height: 100px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    border-radius: 10px;
+    border: 1px solid var(--panel-border);
+    background: var(--bg);
+    color: var(--ink);
+    padding: 10px;
+    outline: none;
+    resize: vertical;
   }
 
   .out pre{
-    white-space:pre-wrap; word-break:break-word;
-    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    background:#0b1020; color:#e5e7eb; padding:10px 12px; border-radius:10px; max-height:420px; overflow:auto;
-  }
-  @media (prefers-color-scheme: dark){
-    .out pre{background:#0a0f1a; color:#dbe3f4;}
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 12px 14px;
+    border-radius: 10px;
+    border-left: 4px solid var(--brand);
+    margin: 0;
+    max-height: none;
   }
 
   .tag{
-    display:inline-flex; align-items:center; gap:6px; background:#eef2ff; color:#3730a3;
-    padding:2px 8px; border-radius:9999px; font-size:12px; font-weight:700;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: color-mix(in oklab, var(--brand) 15%, transparent);
+    color: var(--brand);
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .cap-badge{
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #fff;
+    font-weight: 800;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.25);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    z-index: 40;
   }
   @media (prefers-color-scheme: dark){
-    .tag{ background:#172554; color:#c7d2fe; }
+    .cap-badge{ background: rgba(255, 255, 255, 0.15); }
   }
 
-  /* 捕獲合計バッジ（右下固定） */
-  .cap-badge{
-    position:absolute; right:12px; bottom:12px;
-    background:#111827; color:#fff; font-weight:800; font-size:12px;
-    padding:6px 10px; border-radius:9999px; box-shadow:0 2px 6px rgba(0,0,0,.25);
-    opacity:.96; pointer-events:none;
-  }
-
-  /* 青い光エフェクト（将軍＆将撃破後の自分） */
   .glow-blue{
-    box-shadow: 0 0 0 0 rgba(37,99,235,.55);
+    box-shadow: 0 0 0 0 rgba(37,99,235,.6);
     animation: pulse-blue 1.8s ease-out infinite;
   }
   .glow-blue-strong{
-    outline:3px solid var(--brand);
-    box-shadow: 0 0 0 0 rgba(37,99,235,.7), 0 0 16px 4px rgba(37,99,235,.25);
+    outline: 3px solid var(--brand);
+    box-shadow: 0 0 0 0 rgba(37,99,235,.8), 0 0 16px 4px rgba(37,99,235,.35);
     animation: pulse-blue 1.6s ease-out infinite;
   }
   @keyframes pulse-blue{
-    0%   { box-shadow: 0 0 0 0 rgba(37,99,235,.55), 0 0 16px 4px rgba(37,99,235,.2); }
-    60%  { box-shadow: 0 0 0 14px rgba(37,99,235,0), 0 0 8px 2px rgba(37,99,235,.28); }
+    0%   { box-shadow: 0 0 0 0 rgba(37,99,235,.6), 0 0 16px 4px rgba(37,99,235,.3); }
+    60%  { box-shadow: 0 0 0 12px rgba(37,99,235,0), 0 0 8px 2px rgba(37,99,235,.3); }
     100% { box-shadow: 0 0 0 0 rgba(37,99,235,0),  0 0 0 0 rgba(37,99,235,0); }
   }
 
   @media (prefers-reduced-motion: reduce){
-    .piece, .mv-overlay, .btn { transition:none !important; }
-    .glow-blue, .glow-blue-strong{ animation:none !important; }
+    .piece, .mv-overlay, .btn, .piece-chip { transition: none !important; }
+    .glow-blue, .glow-blue-strong{ animation: none !important; }
   }
 </style>
 </head>
 <body>
-  <h1>8×9交点盤：<span class="tag">車</span> ターン可視化＆タップ捕獲（安全判定付き）</h1>
+  <h1>8×9交点盤：<span class="tag">車</span> ターン可視化＆タップ捕獲</h1>
   <div class="app">
     <div class="left">
+      <!-- 1. 操作＆メッセージパネル（スマホで視線の上下移動を減らすためメッセージを上に統合） -->
       <div class="panel">
+        <div class="out" id="output" style="margin-bottom: 12px;"><pre>トレイから相手の駒を置き、「ターン終了」を押すと可視化されます。</pre></div>
+
         <div class="legend" style="margin-bottom:6px;">
-          ① トレイから「相手の駒」を <b>ドラッグ</b>（PC） / <b>タップ選択→盤タップ</b>（スマホ）で配置 → 準備できたら <b>ターン終了</b> を押してください
+          ① <b>駒をタップ選択 → 盤をタップ</b>して配置（準備完了後「ターン終了」）
         </div>
         <div class="tray" id="tray" role="group" aria-label="相手の駒トレイ"></div>
 
-        <div class="btn-row" style="margin-top:8px;">
+        <div class="btn-row">
           <button id="endTurnBtn" class="btn">ターン終了（可視化）</button>
-          <button id="clearBoard" class="btn secondary">盤をクリア</button>
+          <button id="clearBoard" class="btn secondary" style="flex: 0 1 auto;">盤クリア</button>
         </div>
 
-        <div class="legend" style="margin-top:10px;">
+        <div style="margin-top:14px; padding-top:10px; border-top: 1px solid var(--panel-border);">
           <label><input type="checkbox" id="blocklessSweep" checked />
-            将の能力：ブロック無視（次手で縦横の敵を全部倒す）
+            将の能力：ブロック無視（次手で縦横の敵を一掃）
           </label>
         </div>
       </div>
 
-      <div class="panel">
-        <div class="legend" style="margin-bottom:6px;">② 盤（交点に駒を置く）</div>
+      <!-- 2. 盤面パネル -->
+      <div class="panel" style="padding: 10px;">
         <div class="board-wrap">
           <div id="board" class="board"></div>
           <div id="capBadge" class="cap-badge">捕獲: 0</div>
@@ -235,11 +456,9 @@
       </div>
     </div>
 
+    <!-- 3. データ保存パネル -->
     <div class="panel">
-      <div class="legend" style="margin-bottom:6px;">③ メッセージ</div>
-      <div class="out" id="output"><pre>トレイから相手の駒を置き、「ターン終了」を押すと可視化されます。</pre></div>
-
-      <div class="legend" style="margin:10px 0 6px;">④ 局面の保存 / 復元（JSON）</div>
+      <div class="legend" style="margin-bottom:6px;">局面の保存 / 復元（JSON）</div>
       <textarea id="jsonBox" placeholder="局面JSONがここに入ります"></textarea>
       <div class="btn-row">
         <button id="saveJson" class="btn secondary">JSON保存</button>
@@ -251,10 +470,6 @@
 <script>
 /* ============================================================
    8×9交点盤（自分＝車：ターン終了→可視化→クリック移動/捕獲）
-   ビジュアル強化：
-   - 各駒に絵文字＋ラベル
-   - 将（将軍）は常時青い光
-   - 将撃破後は自分（車）に青い光（次手の一掃が終わるまで）
 ============================================================ */
 
 /* === 基本定数 === */
@@ -314,7 +529,6 @@ function cloneState(st){
 
 /* === 駒のビジュアル（絵文字＋ラベル） === */
 function typeToVisual(type, side){
-  // 側によらず同じ絵文字。自駒は背景色が青になる。
   switch(type){
     case "卒": return { emoji: "🪖", label: "卒", title: "卒（一般兵）" };
     case "士": return { emoji: "🧠", label: "士", title: "士（諸葛孔明）" };
@@ -322,7 +536,7 @@ function typeToVisual(type, side){
     case "砲": return { emoji: "💣", label: "砲", title: "砲（大砲）" };
     case "馬": return { emoji: "🐎", label: "馬", title: "馬" };
     case "車": return { emoji: "🛺", label: "車", title: "車（人力車/手押し車）" };
-    case "将": return { emoji: "🪖", label: "将", title: "将（将軍）" };
+    case "将": return { emoji: "👑", label: "将", title: "将（将軍）" };
     default:   return { emoji: "⬤", label: type, title: type };
   }
 }
@@ -335,7 +549,7 @@ function renderTray(){
     chip.type = "button";
     chip.className = 'piece-chip';
     const vis = typeToVisual(t, SIDE.ENEMY);
-    chip.textContent = `${vis.emoji} ${vis.label}`;
+    chip.innerHTML = `${vis.emoji} ${vis.label}`;
     chip.dataset.side = SIDE.ENEMY;
     chip.setAttribute('aria-pressed', 'false');
     chip.title = `トレイ: ${vis.title}`;
@@ -448,7 +662,6 @@ function clearTraySelection(){
 }
 
 function renderPieces(){
-  // 駒DOMとオーバーレイの全消去（グリッド線は保持）
   [...boardEl.querySelectorAll('.piece')].forEach(el=>el.remove());
   [...boardEl.querySelectorAll('.mv-overlay')].forEach(el=>el.remove());
 
@@ -463,24 +676,20 @@ function renderPieces(){
     el.dataset.id = p.id;
     el.dataset.side = p.side;
 
-    // 将軍は常に青い光（敵味方に関わらずタイプで判定）
     if(p.type === "将"){
       el.classList.add('glow-blue-strong');
     }
 
-    // 自分（車）は nextSweep 中に青い光（将軍撃破後〜次手の一掃終了まで）
     if(p.side === SIDE.SELF && p.type === "車" && state.nextSweep){
       el.classList.add('glow-blue');
     }
 
-    // 敵はドラッグで再配置可（自ターン前の編集として）
     if(p.side===SIDE.ENEMY){
       el.draggable = true;
       el.addEventListener('dragstart', (e)=>{
         e.dataTransfer.setData('text/plain', JSON.stringify({ from:"board", id:p.id }));
       });
 
-      // クリック：可視化中→捕獲処理 / 可視化前→編集モード
       el.addEventListener('click', ()=>{
         if(state.selfTurnReady){
           const me = getSelf();
@@ -499,7 +708,6 @@ function renderPieces(){
           return;
         }
 
-        // 可視化前：編集（移動先をセルで選ぶ）
         if(state.ui.pendingMoveId === p.id){
           state.ui.pendingMoveId = null;
           el.classList.remove('selecting');
@@ -516,7 +724,6 @@ function renderPieces(){
     boardEl.appendChild(el);
   }
 
-  // 可視化中は敵駒に安全/危険の輪郭を付与
   if(state.selfTurnReady){
     const reach = computeReachables();
     decorateCapturables(reach.captures);
@@ -546,7 +753,7 @@ function onDropToCell(e){
     const p = state.pieces.find(q=>q.id===id);
     if(!p) return;
     if(p.side===SIDE.ENEMY){
-      if(occ) return; // 敵同士の重なり禁止
+      if(occ) return;
       p.x = x; p.y = y;
       state.ui.pendingMoveId = null;
       renderPieces();
@@ -585,7 +792,7 @@ function firstBlock(st, x,y, dx,dy){
 function computeReachables(){
   const me = getSelf();
   const empty = [];
-  const captures = []; // { id, safe }
+  const captures = [];
   if(!me) return { empty, captures };
 
   for(const [dx,dy] of DIRS_ORTH){
@@ -603,7 +810,7 @@ function computeReachables(){
   return { empty, captures };
 }
 
-/* === 危険判定（その座標へ移動したら倒され得るか） === */
+/* === 危険判定 === */
 function pieceAttacks(st, p){
   const res=[];
   switch(p.type){
@@ -664,7 +871,7 @@ function pieceAttacks(st, p){
       for(const leg of legs){
         const lx=p.x+leg.b[0], ly=p.y+leg.b[1];
         if(!inBounds(lx,ly)) continue;
-        if(getPieceAt(st,lx,ly)) continue; // 足詰まり
+        if(getPieceAt(st,lx,ly)) continue;
         for(const t of leg.tips){
           const tx=p.x+leg.b[0]+t[0], ty=p.y+leg.b[1]+t[1];
           if(inBounds(tx,ty)) res.push({x:tx,y:ty});
@@ -747,7 +954,7 @@ function decorateCapturables(captList){
   }
 }
 
-/* === キャプチャ可能性（一直線＆途中詰まりなし＆最初の敵であること） === */
+/* === キャプチャ可能性 === */
 function capturableInfo(enemyPiece, me){
   if(enemyPiece.side!==SIDE.ENEMY) return { ok:false };
   if(!(me.x===enemyPiece.x || me.y===enemyPiece.y)) return { ok:false };
@@ -779,29 +986,25 @@ function doSelfMoveOrCapture({ x, y, captureId }){
     return;
   }
 
-  // 捕獲
   if(captureId){
     const target = state.pieces.find(p=>p.id===captureId);
     if(target){
       if(target.type==="将"){
-        state.nextSweep = true; // 次手で一掃 → 同時に自分に青い光（renderPiecesで反映）
+        state.nextSweep = true;
       }
       state.pieces = state.pieces.filter(p=>p.id!==target.id);
       state.capturedTotal += 1;
     }
   }
 
-  // 移動
   me.x = x; me.y = y;
 
-  // 将撃破「次手」での一掃（解除タイミングで青い光も消える）
   if(state.nextSweep === true && captureId === null){
     const removed = applySweepIfAny(state, {x,y}, !!blocklessSweepInput.checked);
     if(removed>0) state.capturedTotal += removed;
     state.nextSweep = false;
   }
 
-  // ターン終了（可視化解除 + 編集解除）
   state.selfTurnReady = false;
   state.ui.pendingMoveId = null;
   clearTraySelection();
@@ -812,7 +1015,6 @@ function doSelfMoveOrCapture({ x, y, captureId }){
   outputEl.textContent = captureId ? "捕獲しました。" : "移動しました。";
 }
 
-// 将撃破後の一掃（戻り値：取り除いた敵駒の数）
 function applySweepIfAny(st, landing, blockless=true){
   const isEnemy = (p)=>p.side===SIDE.ENEMY;
   const victims = [];
@@ -843,13 +1045,13 @@ endTurnBtn.addEventListener('click', ()=>{
   clearTraySelection();
 
   clearOverlays();
-  renderPieces(); // 可視化生成
+  renderPieces();
   const reach = computeReachables();
   const safeCount = reach.empty.filter(e=>e.safe).length + reach.captures.filter(c=>c.safe).length;
   if(safeCount===0){
     outputEl.textContent = "安全に行ける場所がありません（全て危険）。";
   }else{
-    outputEl.textContent = "青＝安全／赤＝危険。青い丸（空点）か青い輪郭の敵駒をタップ/クリックできます。";
+    outputEl.textContent = "青＝安全／赤＝危険。青い丸（空点）か青い輪郭の敵駒をタップできます。";
   }
 });
 
@@ -864,7 +1066,7 @@ clearBoardBtn.addEventListener('click', ()=>{
   clearOverlays();
   renderPieces();
   updateCaptureBadge();
-  outputEl.textContent = "盤をクリアしました（自分の車のみ残し、カウントもリセット）。";
+  outputEl.textContent = "盤をクリアしました（車のみ残し、カウントもリセット）。";
 });
 
 saveJsonBtn.addEventListener('click', ()=>{
